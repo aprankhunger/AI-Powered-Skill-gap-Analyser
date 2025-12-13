@@ -39,3 +39,7 @@ backend/uploads/
 # IDE
 .vscode/
 .idea/
+
+.env
+__pycache__/
+*.pyc

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, session
 from flask_cors import CORS
 from openai import OpenAI
 import pdfplumber
@@ -12,9 +12,11 @@ import os
 from dotenv import load_dotenv
 import redis
 import hashlib
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-CORS(app)
+app.secret_key = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
+CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"])
 
 load_dotenv()
 
@@ -24,7 +26,16 @@ client = OpenAI(
     api_key=os.getenv("OPENROUTER_API_KEY"),  # Never hardcode API keys!
 )
 
-redis_client = redis.Redis(host='localhost', port=6379, db=0)
+# Redis connection (optional - caching will be disabled if Redis is not available)
+try:
+    redis_client = redis.Redis(host=os.getenv('REDIS_HOST', 'localhost'), port=int(os.getenv('REDIS_PORT', 6379)), db=0)
+    redis_client.ping()  # Test connection
+    REDIS_AVAILABLE = True
+except:
+    redis_client = None
+    REDIS_AVAILABLE = False
+    print("Warning: Redis not available. Caching disabled.")
+
 CACHE_TTL = 3600  # 1 hour
 
 SYSTEM_PROMPT = """
@@ -426,14 +437,112 @@ def get_cache_key(file_bytes, target_role):
 
 def get_cached_result(cache_key):
     """Get cached analysis result"""
-    cached = redis_client.get(cache_key)
-    if cached:
-        return json.loads(cached)
+    if not REDIS_AVAILABLE:
+        return None
+    try:
+        cached = redis_client.get(cache_key)
+        if cached:
+            return json.loads(cached)
+    except:
+        pass
     return None
 
 def cache_result(cache_key, result):
     """Cache analysis result"""
-    redis_client.setex(cache_key, CACHE_TTL, json.dumps(result))
+    if not REDIS_AVAILABLE:
+        return
+    try:
+        redis_client.setex(cache_key, CACHE_TTL, json.dumps(result))
+    except:
+        pass
+
+
+# ============ IN-MEMORY USER STORE (for demo - use database in production) ============
+users_db = {}
+
+
+# ============ AUTH ROUTES ============
+@app.route("/auth/signup", methods=["POST"])
+def auth_signup():
+    """User registration"""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    name = data.get("name", "").strip()
+    email = data.get("email", "").strip().lower()
+    password = data.get("password", "")
+    
+    if not name or not email or not password:
+        return jsonify({"error": "Name, email, and password are required"}), 400
+    
+    if len(password) < 6:
+        return jsonify({"error": "Password must be at least 6 characters"}), 400
+    
+    if email in users_db:
+        return jsonify({"error": "Email already registered"}), 400
+    
+    # Store user with hashed password
+    users_db[email] = {
+        "name": name,
+        "email": email,
+        "password_hash": generate_password_hash(password)
+    }
+    
+    # Set session
+    session["user"] = {"name": name, "email": email}
+    
+    return jsonify({
+        "success": True,
+        "message": "Account created successfully",
+        "user": {"name": name, "email": email}
+    })
+
+
+@app.route("/auth/login", methods=["POST"])
+def auth_login():
+    """User login"""
+    data = request.get_json()
+    
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    email = data.get("email", "").strip().lower()
+    password = data.get("password", "")
+    
+    if not email or not password:
+        return jsonify({"error": "Email and password are required"}), 400
+    
+    user = users_db.get(email)
+    
+    if not user or not check_password_hash(user["password_hash"], password):
+        return jsonify({"error": "Invalid email or password"}), 401
+    
+    # Set session
+    session["user"] = {"name": user["name"], "email": user["email"]}
+    
+    return jsonify({
+        "success": True,
+        "message": "Login successful",
+        "user": {"name": user["name"], "email": user["email"]}
+    })
+
+
+@app.route("/auth/logout", methods=["POST"])
+def auth_logout():
+    """User logout"""
+    session.pop("user", None)
+    return jsonify({"success": True, "message": "Logged out successfully"})
+
+
+@app.route("/auth/me", methods=["GET"])
+def auth_me():
+    """Get current user"""
+    user = session.get("user")
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    return jsonify({"success": True, "user": user})
 
 
 # ============ API ROUTES ============
@@ -475,6 +584,7 @@ def analyze_resume():
     
     try:
         file_bytes = resume_file.read()
+        resume_file.seek(0)  # Reset file position for re-reading
         
         # Check cache first
         cache_key = get_cache_key(file_bytes, target_role)
