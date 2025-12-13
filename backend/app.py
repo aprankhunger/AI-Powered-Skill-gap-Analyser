@@ -659,7 +659,7 @@ def analyze_resume():
             "detected_skills": structured_data["detected_skills"],
             "analysis": analysis
         })
-    
+    #working
     except Exception as e:
         import traceback
         print(f"Error analyzing resume: {str(e)}")
