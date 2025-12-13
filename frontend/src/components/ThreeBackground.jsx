@@ -81,7 +81,7 @@ function MouseTrailCanvas() {
 
 const ThreeBackground = () => (
   <>
-    <div className="absolute inset-0 z-10 w-full h-full pointer-events-none">
+    <div className="fixed inset-0 -z-10 w-full h-full pointer-events-none">
       <Canvas camera={{ position: [0, 0, 10], fov: 60 }}>
         {/* Star field */}
         <Stars radius={120} depth={60} count={8000} factor={6} saturation={0.8} fade speed={2.5} />

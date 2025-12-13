@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, session
 from flask_cors import CORS
+from flask_sqlalchemy import SQLAlchemy
 from openai import OpenAI
 import pdfplumber
 import PyPDF2
@@ -13,6 +14,7 @@ from dotenv import load_dotenv
 import redis
 import hashlib
 from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime
 
 # Load environment variables first
 load_dotenv()
@@ -24,9 +26,130 @@ app.secret_key = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///skillgap.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
-# Import and initialize database
-from app.models.database import db, User, Analysis, LearningProgress, init_db
-init_db(app)
+# Initialize SQLAlchemy
+db = SQLAlchemy(app)
+
+
+# ============ DATABASE MODELS ============
+class User(db.Model):
+    """User model for authentication and profile"""
+    __tablename__ = 'users'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256), nullable=False)
+    profile_picture = db.Column(db.String(500), default=None)
+    current_role = db.Column(db.String(100), default=None)
+    target_role = db.Column(db.String(100), default=None)
+    years_experience = db.Column(db.Integer, default=0)
+    bio = db.Column(db.Text, default=None)
+    linkedin_url = db.Column(db.String(300), default=None)
+    github_url = db.Column(db.String(300), default=None)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    analyses = db.relationship('Analysis', backref='user', lazy=True, cascade='all, delete-orphan')
+    learning_progress = db.relationship('LearningProgress', backref='user', lazy=True, cascade='all, delete-orphan')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'email': self.email,
+            'profile_picture': self.profile_picture,
+            'current_role': self.current_role,
+            'target_role': self.target_role,
+            'years_experience': self.years_experience,
+            'bio': self.bio,
+            'linkedin_url': self.linkedin_url,
+            'github_url': self.github_url,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'total_analyses': len(self.analyses)
+        }
+
+
+class Analysis(db.Model):
+    """Model to store resume analysis history"""
+    __tablename__ = 'analyses'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    target_role = db.Column(db.String(100), nullable=False)
+    resume_filename = db.Column(db.String(200), default=None)
+    skill_match_percentage = db.Column(db.Integer, default=0)
+    ats_score = db.Column(db.Integer, default=0)
+    experience_level = db.Column(db.String(50), default=None)
+    years_of_experience = db.Column(db.String(50), default=None)
+    technical_skills = db.Column(db.Text, default='[]')
+    soft_skills = db.Column(db.Text, default='[]')
+    missing_skills = db.Column(db.Text, default='[]')
+    suggestions = db.Column(db.Text, default='{}')
+    learning_resources = db.Column(db.Text, default='[]')
+    skill_roadmap = db.Column(db.Text, default='[]')
+    summary = db.Column(db.Text, default=None)
+    candidate_name = db.Column(db.String(100), default=None)
+    candidate_email = db.Column(db.String(120), default=None)
+    candidate_phone = db.Column(db.String(30), default=None)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'target_role': self.target_role,
+            'resume_filename': self.resume_filename,
+            'skill_match_percentage': self.skill_match_percentage,
+            'ats_score': self.ats_score,
+            'experience_level': self.experience_level,
+            'years_of_experience': self.years_of_experience,
+            'technical_skills': json.loads(self.technical_skills) if self.technical_skills else [],
+            'soft_skills': json.loads(self.soft_skills) if self.soft_skills else [],
+            'missing_skills': json.loads(self.missing_skills) if self.missing_skills else [],
+            'suggestions': json.loads(self.suggestions) if self.suggestions else {},
+            'learning_resources': json.loads(self.learning_resources) if self.learning_resources else [],
+            'skill_roadmap': json.loads(self.skill_roadmap) if self.skill_roadmap else [],
+            'summary': self.summary,
+            'candidate_name': self.candidate_name,
+            'candidate_email': self.candidate_email,
+            'candidate_phone': self.candidate_phone,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class LearningProgress(db.Model):
+    """Model to track skill learning progress"""
+    __tablename__ = 'learning_progress'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    skill_name = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(20), default='not_started')
+    notes = db.Column(db.Text, default=None)
+    resource_url = db.Column(db.String(500), default=None)
+    target_role = db.Column(db.String(100), default=None)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    __table_args__ = (db.UniqueConstraint('user_id', 'skill_name', name='unique_user_skill'),)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'skill_name': self.skill_name,
+            'status': self.status,
+            'notes': self.notes,
+            'resource_url': self.resource_url,
+            'target_role': self.target_role,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+# Create database tables
+with app.app_context():
+    db.create_all()
+    print("Database initialized successfully!")
 
 CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174"])
 
@@ -80,6 +203,17 @@ Rules:
         "project_section": ["suggestion1", "suggestion2"],
         "general": ["suggestion1", "suggestion2"]
     },
+    "skill_roadmap": [
+        {
+            "skill": "skill name",
+            "priority": 1,
+            "importance": "critical/high/medium/low",
+            "improvement_percent": 15,
+            "reason": "Why this skill is needed for the target role",
+            "time_to_learn": "2-4 weeks",
+            "prerequisites": ["skill1", "skill2"]
+        }
+    ],
     "learning_resources": [
         {
             "skill": "missing skill name",
@@ -89,6 +223,13 @@ Rules:
     ],
     "summary": "Brief overall assessment"
 }
+
+For skill_roadmap:
+- Order skills by priority (1 = most important to learn first)
+- improvement_percent should estimate how much the skill_match_percentage would increase if this skill is learned (total should roughly add up to 100 - current_match)
+- Include prerequisite skills if any (skills they should learn before this one)
+- time_to_learn should be realistic estimate for someone at candidate's level
+- importance: "critical" for must-have skills, "high" for strongly recommended, "medium" for good to have, "low" for nice to have
 
 For learning_resources:
 - Include a resource for each missing skill (up to 5 most important ones)
@@ -964,6 +1105,7 @@ def analyze_resume():
                     missing_skills=json.dumps(analysis.get("missing_skills", [])),
                     suggestions=json.dumps(analysis.get("suggestions", {})),
                     learning_resources=json.dumps(analysis.get("learning_resources", [])),
+                    skill_roadmap=json.dumps(analysis.get("skill_roadmap", [])),
                     summary=analysis.get("summary"),
                     candidate_name=analysis.get("candidate_name") or structured_data["candidate_info"].get("name"),
                     candidate_email=structured_data["candidate_info"].get("email"),

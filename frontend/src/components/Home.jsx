@@ -33,13 +33,15 @@ const Home = () => {
     navigate('/scan');
   };
   return (
-  <div className="relative min-h-screen flex flex-col items-center justify-center px-4 overflow-hidden bg-gradient-to-br from-black via-gray-900 to-gray-800 pt-32 scroll-smooth font-[Quicksand,sans-serif]">
+  <div className="relative min-h-screen flex flex-col items-center justify-center px-4 overflow-hidden bg-transparent pt-32 scroll-smooth font-[Quicksand,sans-serif]">
       {/* Animated particle background */}
       <ErrorBoundary>
-        <Suspense fallback={<div className="absolute inset-0 -z-10 w-full h-full bg-gradient-to-br from-[#18181b] via-[#23272f] to-[#0f0f11] flex items-center justify-center text-white text-xl">Loading 3D background...</div>}>
+        <Suspense fallback={<div className="fixed inset-0 -z-10 w-full h-full bg-gradient-to-br from-[#18181b] via-[#23272f] to-[#0f0f11] flex items-center justify-center text-white text-xl">Loading 3D background...</div>}>
           <Canvas3D />
         </Suspense>
       </ErrorBoundary>
+      {/* Background gradient fallback */}
+      <div className="fixed inset-0 -z-20 bg-gradient-to-br from-black via-gray-900 to-gray-800"></div>
       {/* Floating hero card */}
       {/* Floating CTA Button */}
       <a href="#" className="fixed bottom-10 right-10 z-40" onClick={handleGetStarted}>

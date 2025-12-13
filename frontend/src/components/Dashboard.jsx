@@ -1,10 +1,38 @@
-import React from "react";
+import React, { useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import SkillRoadmap from "./SkillRoadmap";
+import { addLearningSkill } from "../api/config";
 
 function Dashboard() {
   const location = useLocation();
   const navigate = useNavigate();
   const { analysisResult, fileName, targetRole } = location.state || {};
+  const [addedSkills, setAddedSkills] = useState([]);
+  const [notification, setNotification] = useState(null);
+
+  // Handle adding skill to learning list
+  const handleAddToLearning = async (skill) => {
+    try {
+      await addLearningSkill({
+        skill_name: skill.skill,
+        target_role: targetRole,
+        resource_url: null,
+        notes: `Priority: ${skill.priority} | Expected improvement: +${skill.improvement_percent}%`
+      });
+      setAddedSkills([...addedSkills, skill.skill]);
+      setNotification({ type: 'success', message: `"${skill.skill}" added to your learning list!` });
+      setTimeout(() => setNotification(null), 3000);
+    } catch (err) {
+      if (err.message?.includes("already in your learning")) {
+        setNotification({ type: 'info', message: `"${skill.skill}" is already in your learning list` });
+      } else if (err.message?.includes("Not authenticated")) {
+        setNotification({ type: 'warning', message: 'Please login to save skills to your learning list' });
+      } else {
+        setNotification({ type: 'error', message: 'Failed to add skill. Please try again.' });
+      }
+      setTimeout(() => setNotification(null), 3000);
+    }
+  };
 
   // If no analysis result, show empty state
   if (!analysisResult) {
@@ -28,6 +56,24 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen pt-24 px-4 pb-12 bg-gradient-to-br from-[#1a2233] to-[#232b3e]">
+      {/* Notification Toast */}
+      {notification && (
+        <div className={`fixed top-20 right-4 z-50 px-6 py-3 rounded-lg shadow-lg transition-all duration-300 ${
+          notification.type === 'success' ? 'bg-green-500 text-white' :
+          notification.type === 'error' ? 'bg-red-500 text-white' :
+          notification.type === 'warning' ? 'bg-yellow-500 text-black' :
+          'bg-blue-500 text-white'
+        }`}>
+          <div className="flex items-center gap-2">
+            {notification.type === 'success' && <span>✅</span>}
+            {notification.type === 'error' && <span>❌</span>}
+            {notification.type === 'warning' && <span>⚠️</span>}
+            {notification.type === 'info' && <span>ℹ️</span>}
+            {notification.message}
+          </div>
+        </div>
+      )}
+
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="bg-white/10 backdrop-blur rounded-2xl p-6 shadow-lg border border-white/20 mb-6">
@@ -153,6 +199,17 @@ function Dashboard() {
               )}
             </div>
           </div>
+
+          {/* Skill Roadmap - NEW */}
+          {analysis?.skill_roadmap && analysis.skill_roadmap.length > 0 && (
+            <div className="lg:col-span-2">
+              <SkillRoadmap 
+                roadmap={analysis.skill_roadmap}
+                currentMatch={analysis.skill_match_percentage || 0}
+                onAddToLearning={handleAddToLearning}
+              />
+            </div>
+          )}
 
           {/* Suggestions */}
           <div className="bg-white/10 backdrop-blur rounded-xl p-6 border border-white/20 lg:col-span-2">
