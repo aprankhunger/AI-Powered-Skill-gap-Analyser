@@ -163,12 +163,36 @@ ALLOWED_ORIGINS = [
 # Add production frontend URL from environment variable
 FRONTEND_URL = os.getenv("FRONTEND_URL")
 if FRONTEND_URL:
+    # Clean up the URL - remove trailing slashes
+    FRONTEND_URL = FRONTEND_URL.rstrip('/')
     ALLOWED_ORIGINS.append(FRONTEND_URL)
-    # Also add without trailing slash and with https
-    if not FRONTEND_URL.startswith("https://"):
+    # Also add https version if http was provided
+    if FRONTEND_URL.startswith("http://"):
         ALLOWED_ORIGINS.append(FRONTEND_URL.replace("http://", "https://"))
+    # Also add http version if https was provided (for completeness)
+    elif FRONTEND_URL.startswith("https://"):
+        ALLOWED_ORIGINS.append(FRONTEND_URL.replace("https://", "http://"))
 
-CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS, supports_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
+# Print allowed origins for debugging
+print(f"CORS Allowed Origins: {ALLOWED_ORIGINS}")
+
+CORS(app, 
+     supports_credentials=True, 
+     origins=ALLOWED_ORIGINS,
+     allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept", "Origin"],
+     expose_headers=["Content-Type", "Authorization"],
+     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"])
+
+# Add explicit CORS headers to all responses
+@app.after_request
+def after_request(response):
+    origin = request.headers.get('Origin')
+    if origin in ALLOWED_ORIGINS:
+        response.headers['Access-Control-Allow-Origin'] = origin
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, Accept, Origin'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+    return response
 
 # Configure OpenRouter
 client = OpenAI(
