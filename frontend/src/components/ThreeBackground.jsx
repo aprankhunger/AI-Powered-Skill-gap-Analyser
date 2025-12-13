@@ -37,7 +37,6 @@ function MouseTrailCanvas() {
     window.addEventListener('resize', resize);
 
     const handlePointerMove = (e) => {
-      // Use clientX/clientY for viewport tracking
       mousePos.current = {
         x: e.clientX,
         y: e.clientY
@@ -46,20 +45,60 @@ function MouseTrailCanvas() {
     window.addEventListener('pointermove', handlePointerMove);
 
     const draw = () => {
-      points.current.push({ x: mousePos.current.x, y: mousePos.current.y });
-      if (points.current.length > 40) points.current.shift();
+      // Add new point with timestamp for fading
+      points.current.push({ 
+        x: mousePos.current.x, 
+        y: mousePos.current.y,
+        time: Date.now()
+      });
+      
+      // Keep trail short (15 points instead of 40)
+      if (points.current.length > 15) points.current.shift();
+      
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.beginPath();
-      for (let i = 0; i < points.current.length; i++) {
-        const p = points.current[i];
-        if (i === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
+      
+      if (points.current.length < 3) {
+        animationFrameId = requestAnimationFrame(draw);
+        return;
       }
-      ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+
+      // Draw smooth curve using quadratic bezier
+      ctx.beginPath();
+      ctx.moveTo(points.current[0].x, points.current[0].y);
+      
+      for (let i = 1; i < points.current.length - 1; i++) {
+        const p0 = points.current[i - 1];
+        const p1 = points.current[i];
+        const p2 = points.current[i + 1];
+        
+        // Calculate control point for smooth curve
+        const cpX = p1.x;
+        const cpY = p1.y;
+        const endX = (p1.x + p2.x) / 2;
+        const endY = (p1.y + p2.y) / 2;
+        
+        ctx.quadraticCurveTo(cpX, cpY, endX, endY);
+      }
+      
+      // Connect to last point
+      const lastPoint = points.current[points.current.length - 1];
+      ctx.lineTo(lastPoint.x, lastPoint.y);
+      
+      // Gradient stroke for fading effect
+      const gradient = ctx.createLinearGradient(
+        points.current[0].x, points.current[0].y,
+        lastPoint.x, lastPoint.y
+      );
+      gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+      gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.4)');
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0.8)');
+      
+      ctx.strokeStyle = gradient;
       ctx.lineWidth = 2;
-      ctx.shadowColor = 'transparent';
-      ctx.shadowBlur = 0;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
       ctx.stroke();
+      
       animationFrameId = requestAnimationFrame(draw);
     };
     draw();
