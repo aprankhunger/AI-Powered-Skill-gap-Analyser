@@ -1,5 +1,6 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { getCurrentUser, logout } from "../../../api/config";
 
 function Navbar() {
   const navigate = useNavigate();
@@ -7,8 +8,23 @@ function Navbar() {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef();
 
+  // Check if user is logged in on mount
+  useEffect(() => {
+    const checkAuth = async () => {
+      try {
+        const response = await getCurrentUser();
+        if (response.user) {
+          setUserName(response.user.name);
+        }
+      } catch (err) {
+        // Not logged in, ignore
+      }
+    };
+    checkAuth();
+  }, []);
+
   // Listen for login/signup success via custom event
-  React.useEffect(() => {
+  useEffect(() => {
     const handler = (e) => {
       setUserName(e.detail);
     };
@@ -17,7 +33,7 @@ function Navbar() {
   }, []);
 
   // Close menu on outside click
-  React.useEffect(() => {
+  useEffect(() => {
     function handleClick(e) {
       if (menuRef.current && !menuRef.current.contains(e.target)) {
         setShowMenu(false);
@@ -34,9 +50,15 @@ function Navbar() {
     navigate('/');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (err) {
+      // Ignore logout errors
+    }
     setUserName("");
     setShowMenu(false);
+    navigate('/');
   };
 
   return (
@@ -71,18 +93,34 @@ function Navbar() {
         {userName ? (
           <div className="relative" ref={menuRef}>
             <span
-              className="text-blue-400 font-semibold text-base ml-4 cursor-pointer hover:underline"
+              className="text-blue-400 font-semibold text-base ml-4 cursor-pointer hover:underline flex items-center gap-2"
               onClick={() => setShowMenu(v => !v)}
             >
+              <span className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-sm font-bold">
+                {userName.charAt(0).toUpperCase()}
+              </span>
               {userName}
             </span>
             {showMenu && (
-              <div className="absolute right-0 mt-2 bg-white rounded shadow-lg py-2 px-4 min-w-[120px] text-black text-sm">
+              <div className="absolute right-0 mt-2 bg-white rounded-lg shadow-lg py-2 min-w-[150px] text-black text-sm">
                 <button
-                  className="w-full text-left px-2 py-1 hover:bg-blue-100 rounded"
+                  className="w-full text-left px-4 py-2 hover:bg-blue-100 flex items-center gap-2"
+                  onClick={() => { setShowMenu(false); navigate('/profile'); }}
+                >
+                  👤 Profile
+                </button>
+                <button
+                  className="w-full text-left px-4 py-2 hover:bg-blue-100 flex items-center gap-2"
+                  onClick={() => { setShowMenu(false); navigate('/scan'); }}
+                >
+                  📄 New Analysis
+                </button>
+                <hr className="my-1" />
+                <button
+                  className="w-full text-left px-4 py-2 hover:bg-red-100 text-red-600 flex items-center gap-2"
                   onClick={handleLogout}
                 >
-                  Log Out
+                  🚪 Log Out
                 </button>
               </div>
             )}

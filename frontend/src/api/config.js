@@ -11,6 +11,17 @@ export const ENDPOINTS = {
   LOGIN: '/auth/login',
   SIGNUP: '/auth/signup',
   LOGOUT: '/auth/logout',
+  ME: '/auth/me',
+  
+  // Profile
+  PROFILE: '/profile',
+  
+  // Analysis History
+  ANALYSES_HISTORY: '/analyses/history',
+  ANALYSIS_DETAIL: '/analyses', // + /:id
+  
+  // Learning Progress
+  LEARNING_PROGRESS: '/learning/progress',
 };
 
 // API Helper Functions
@@ -86,9 +97,76 @@ export const logout = async () => {
   });
 };
 
+export const getCurrentUser = async () => {
+  return apiRequest(ENDPOINTS.ME, {
+    method: 'GET',
+  });
+};
+
+// Profile API
+export const getProfile = async () => {
+  return apiRequest(ENDPOINTS.PROFILE, {
+    method: 'GET',
+  });
+};
+
+export const updateProfile = async (profileData) => {
+  return apiRequest(ENDPOINTS.PROFILE, {
+    method: 'PUT',
+    body: JSON.stringify(profileData),
+  });
+};
+
+// Analysis History API
+export const getAnalysisHistory = async (page = 1, perPage = 10) => {
+  return apiRequest(`${ENDPOINTS.ANALYSES_HISTORY}?page=${page}&per_page=${perPage}`, {
+    method: 'GET',
+  });
+};
+
+export const getAnalysisDetail = async (analysisId) => {
+  return apiRequest(`${ENDPOINTS.ANALYSIS_DETAIL}/${analysisId}`, {
+    method: 'GET',
+  });
+};
+
+export const deleteAnalysis = async (analysisId) => {
+  return apiRequest(`${ENDPOINTS.ANALYSIS_DETAIL}/${analysisId}`, {
+    method: 'DELETE',
+  });
+};
+
+// Learning Progress API
+export const getLearningProgress = async () => {
+  return apiRequest(ENDPOINTS.LEARNING_PROGRESS, {
+    method: 'GET',
+  });
+};
+
+export const addLearningSkill = async (skillData) => {
+  return apiRequest(ENDPOINTS.LEARNING_PROGRESS, {
+    method: 'POST',
+    body: JSON.stringify(skillData),
+  });
+};
+
+export const updateLearningProgress = async (progressId, data) => {
+  return apiRequest(`${ENDPOINTS.LEARNING_PROGRESS}/${progressId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+};
+
+export const deleteLearningProgress = async (progressId) => {
+  return apiRequest(`${ENDPOINTS.LEARNING_PROGRESS}/${progressId}`, {
+    method: 'DELETE',
+  });
+};
+
 // Health Check
 export const checkHealth = async () => {
   return apiRequest(ENDPOINTS.HEALTH, {
     method: 'GET',
   });
 };
+

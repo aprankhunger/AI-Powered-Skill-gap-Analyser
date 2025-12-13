@@ -14,11 +14,21 @@ import redis
 import hashlib
 from werkzeug.security import generate_password_hash, check_password_hash
 
+# Load environment variables first
+load_dotenv()
+
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
-CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174"])
 
-load_dotenv()
+# Database configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///skillgap.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Import and initialize database
+from app.models.database import db, User, Analysis, LearningProgress, init_db
+init_db(app)
+
+CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174"])
 
 # Configure OpenRouter
 client = OpenAI(
@@ -458,14 +468,19 @@ def cache_result(cache_key, result):
         pass
 
 
-# ============ IN-MEMORY USER STORE (for demo - use database in production) ============
-users_db = {}
+# ============ HELPER FUNCTION FOR AUTH ============
+def get_current_user():
+    """Get current logged in user from session"""
+    user_data = session.get("user")
+    if not user_data:
+        return None
+    return User.query.filter_by(email=user_data.get("email")).first()
 
 
 # ============ AUTH ROUTES ============
 @app.route("/auth/signup", methods=["POST"])
 def auth_signup():
-    """User registration"""
+    """User registration with database"""
     data = request.get_json()
     
     if not data:
@@ -481,29 +496,38 @@ def auth_signup():
     if len(password) < 6:
         return jsonify({"error": "Password must be at least 6 characters"}), 400
     
-    if email in users_db:
+    # Check if email already exists
+    existing_user = User.query.filter_by(email=email).first()
+    if existing_user:
         return jsonify({"error": "Email already registered"}), 400
     
-    # Store user with hashed password
-    users_db[email] = {
-        "name": name,
-        "email": email,
-        "password_hash": generate_password_hash(password)
-    }
+    # Create new user in database
+    new_user = User(
+        name=name,
+        email=email,
+        password_hash=generate_password_hash(password)
+    )
     
-    # Set session
-    session["user"] = {"name": name, "email": email}
-    
-    return jsonify({
-        "success": True,
-        "message": "Account created successfully",
-        "user": {"name": name, "email": email}
-    })
+    try:
+        db.session.add(new_user)
+        db.session.commit()
+        
+        # Set session
+        session["user"] = {"id": new_user.id, "name": name, "email": email}
+        
+        return jsonify({
+            "success": True,
+            "message": "Account created successfully",
+            "user": new_user.to_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Failed to create account", "details": str(e)}), 500
 
 
 @app.route("/auth/login", methods=["POST"])
 def auth_login():
-    """User login"""
+    """User login with database"""
     data = request.get_json()
     
     if not data:
@@ -515,18 +539,19 @@ def auth_login():
     if not email or not password:
         return jsonify({"error": "Email and password are required"}), 400
     
-    user = users_db.get(email)
+    # Find user in database
+    user = User.query.filter_by(email=email).first()
     
-    if not user or not check_password_hash(user["password_hash"], password):
+    if not user or not check_password_hash(user.password_hash, password):
         return jsonify({"error": "Invalid email or password"}), 401
     
     # Set session
-    session["user"] = {"name": user["name"], "email": user["email"]}
+    session["user"] = {"id": user.id, "name": user.name, "email": user.email}
     
     return jsonify({
         "success": True,
         "message": "Login successful",
-        "user": {"name": user["name"], "email": user["email"]}
+        "user": user.to_dict()
     })
 
 
@@ -539,11 +564,281 @@ def auth_logout():
 
 @app.route("/auth/me", methods=["GET"])
 def auth_me():
-    """Get current user"""
-    user = session.get("user")
+    """Get current user with full profile"""
+    user = get_current_user()
     if not user:
         return jsonify({"error": "Not authenticated"}), 401
-    return jsonify({"success": True, "user": user})
+    return jsonify({"success": True, "user": user.to_dict()})
+
+
+# ============ PROFILE ROUTES ============
+@app.route("/profile", methods=["GET"])
+def get_profile():
+    """Get user profile with statistics"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    # Get analysis statistics
+    analyses = Analysis.query.filter_by(user_id=user.id).order_by(Analysis.created_at.desc()).all()
+    
+    # Calculate stats
+    total_analyses = len(analyses)
+    avg_skill_match = sum(a.skill_match_percentage for a in analyses) / total_analyses if total_analyses > 0 else 0
+    avg_ats_score = sum(a.ats_score for a in analyses) / total_analyses if total_analyses > 0 else 0
+    
+    # Get learning progress stats
+    learning_items = LearningProgress.query.filter_by(user_id=user.id).all()
+    skills_completed = len([l for l in learning_items if l.status == 'completed'])
+    skills_in_progress = len([l for l in learning_items if l.status == 'in_progress'])
+    
+    # Get latest analysis
+    latest_analysis = analyses[0].to_dict() if analyses else None
+    
+    return jsonify({
+        "success": True,
+        "profile": user.to_dict(),
+        "stats": {
+            "total_analyses": total_analyses,
+            "avg_skill_match": round(avg_skill_match, 1),
+            "avg_ats_score": round(avg_ats_score, 1),
+            "skills_completed": skills_completed,
+            "skills_in_progress": skills_in_progress,
+            "total_skills_tracked": len(learning_items)
+        },
+        "latest_analysis": latest_analysis
+    })
+
+
+@app.route("/profile", methods=["PUT"])
+def update_profile():
+    """Update user profile"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    # Update allowed fields
+    allowed_fields = ['name', 'current_role', 'target_role', 'years_experience', 'bio', 'linkedin_url', 'github_url', 'profile_picture']
+    
+    for field in allowed_fields:
+        if field in data:
+            setattr(user, field, data[field])
+    
+    try:
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": "Profile updated successfully",
+            "profile": user.to_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Failed to update profile", "details": str(e)}), 500
+
+
+# ============ ANALYSIS HISTORY ROUTES ============
+@app.route("/analyses/history", methods=["GET"])
+def get_analysis_history():
+    """Get user's analysis history"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    # Get pagination params
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
+    # Query analyses
+    analyses = Analysis.query.filter_by(user_id=user.id)\
+        .order_by(Analysis.created_at.desc())\
+        .paginate(page=page, per_page=per_page, error_out=False)
+    
+    return jsonify({
+        "success": True,
+        "analyses": [a.to_dict() for a in analyses.items],
+        "pagination": {
+            "page": page,
+            "per_page": per_page,
+            "total": analyses.total,
+            "pages": analyses.pages,
+            "has_next": analyses.has_next,
+            "has_prev": analyses.has_prev
+        }
+    })
+
+
+@app.route("/analyses/<int:analysis_id>", methods=["GET"])
+def get_analysis_detail(analysis_id):
+    """Get specific analysis details"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    analysis = Analysis.query.filter_by(id=analysis_id, user_id=user.id).first()
+    if not analysis:
+        return jsonify({"error": "Analysis not found"}), 404
+    
+    return jsonify({
+        "success": True,
+        "analysis": analysis.to_dict()
+    })
+
+
+@app.route("/analyses/<int:analysis_id>", methods=["DELETE"])
+def delete_analysis(analysis_id):
+    """Delete an analysis"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    analysis = Analysis.query.filter_by(id=analysis_id, user_id=user.id).first()
+    if not analysis:
+        return jsonify({"error": "Analysis not found"}), 404
+    
+    try:
+        db.session.delete(analysis)
+        db.session.commit()
+        return jsonify({"success": True, "message": "Analysis deleted successfully"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Failed to delete analysis", "details": str(e)}), 500
+
+
+# ============ LEARNING PROGRESS ROUTES ============
+@app.route("/learning/progress", methods=["GET"])
+def get_learning_progress():
+    """Get user's learning progress"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    progress = LearningProgress.query.filter_by(user_id=user.id)\
+        .order_by(LearningProgress.updated_at.desc()).all()
+    
+    # Group by status
+    grouped = {
+        "not_started": [],
+        "in_progress": [],
+        "completed": []
+    }
+    
+    for item in progress:
+        grouped[item.status].append(item.to_dict())
+    
+    return jsonify({
+        "success": True,
+        "progress": [p.to_dict() for p in progress],
+        "grouped": grouped,
+        "stats": {
+            "total": len(progress),
+            "not_started": len(grouped["not_started"]),
+            "in_progress": len(grouped["in_progress"]),
+            "completed": len(grouped["completed"])
+        }
+    })
+
+
+@app.route("/learning/progress", methods=["POST"])
+def add_learning_skill():
+    """Add a skill to learning progress"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    data = request.get_json()
+    if not data or not data.get("skill_name"):
+        return jsonify({"error": "Skill name is required"}), 400
+    
+    skill_name = data.get("skill_name").strip()
+    
+    # Check if skill already exists for user
+    existing = LearningProgress.query.filter_by(user_id=user.id, skill_name=skill_name).first()
+    if existing:
+        return jsonify({"error": "Skill already in your learning list", "progress": existing.to_dict()}), 400
+    
+    new_progress = LearningProgress(
+        user_id=user.id,
+        skill_name=skill_name,
+        status=data.get("status", "not_started"),
+        notes=data.get("notes"),
+        resource_url=data.get("resource_url"),
+        target_role=data.get("target_role")
+    )
+    
+    try:
+        db.session.add(new_progress)
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": "Skill added to learning progress",
+            "progress": new_progress.to_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Failed to add skill", "details": str(e)}), 500
+
+
+@app.route("/learning/progress/<int:progress_id>", methods=["PUT"])
+def update_learning_progress(progress_id):
+    """Update learning progress for a skill"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    progress = LearningProgress.query.filter_by(id=progress_id, user_id=user.id).first()
+    if not progress:
+        return jsonify({"error": "Progress item not found"}), 404
+    
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+    
+    # Update allowed fields
+    if "status" in data:
+        if data["status"] not in ["not_started", "in_progress", "completed"]:
+            return jsonify({"error": "Invalid status"}), 400
+        progress.status = data["status"]
+    
+    if "notes" in data:
+        progress.notes = data["notes"]
+    
+    if "resource_url" in data:
+        progress.resource_url = data["resource_url"]
+    
+    try:
+        db.session.commit()
+        return jsonify({
+            "success": True,
+            "message": "Progress updated successfully",
+            "progress": progress.to_dict()
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Failed to update progress", "details": str(e)}), 500
+
+
+@app.route("/learning/progress/<int:progress_id>", methods=["DELETE"])
+def delete_learning_progress(progress_id):
+    """Delete a skill from learning progress"""
+    user = get_current_user()
+    if not user:
+        return jsonify({"error": "Not authenticated"}), 401
+    
+    progress = LearningProgress.query.filter_by(id=progress_id, user_id=user.id).first()
+    if not progress:
+        return jsonify({"error": "Progress item not found"}), 404
+    
+    try:
+        db.session.delete(progress)
+        db.session.commit()
+        return jsonify({"success": True, "message": "Skill removed from learning progress"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Failed to delete progress", "details": str(e)}), 500
 
 
 # ============ API ROUTES ============
@@ -651,13 +946,45 @@ def analyze_resume():
             "analysis": analysis
         })
         
+        # Save analysis for logged-in users
+        analysis_id = None
+        current_user = get_current_user()
+        if current_user:
+            try:
+                new_analysis = Analysis(
+                    user_id=current_user.id,
+                    target_role=target_role,
+                    resume_filename=resume_file.filename,
+                    skill_match_percentage=analysis.get("skill_match_percentage", 0),
+                    ats_score=analysis.get("ats_score", 0),
+                    experience_level=analysis.get("experience_level"),
+                    years_of_experience=analysis.get("years_of_experience"),
+                    technical_skills=json.dumps(analysis.get("technical_skills", [])),
+                    soft_skills=json.dumps(analysis.get("soft_skills", [])),
+                    missing_skills=json.dumps(analysis.get("missing_skills", [])),
+                    suggestions=json.dumps(analysis.get("suggestions", {})),
+                    learning_resources=json.dumps(analysis.get("learning_resources", [])),
+                    summary=analysis.get("summary"),
+                    candidate_name=analysis.get("candidate_name") or structured_data["candidate_info"].get("name"),
+                    candidate_email=structured_data["candidate_info"].get("email"),
+                    candidate_phone=structured_data["candidate_info"].get("phone")
+                )
+                db.session.add(new_analysis)
+                db.session.commit()
+                analysis_id = new_analysis.id
+            except Exception as save_error:
+                print(f"Failed to save analysis: {save_error}")
+                db.session.rollback()
+        
         # Return complete response
         return jsonify({
             "success": True,
             "target_role": target_role,
             "candidate_info": structured_data["candidate_info"],
             "detected_skills": structured_data["detected_skills"],
-            "analysis": analysis
+            "analysis": analysis,
+            "analysis_id": analysis_id,
+            "saved": analysis_id is not None
         })
     #working
     except Exception as e:

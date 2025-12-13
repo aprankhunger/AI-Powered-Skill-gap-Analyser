@@ -8,6 +8,7 @@ import Login from "./components/Login";
 import SignUp from "./components/SignUp";
 import Dashboard from "./components/Dashboard";
 import Blog from "./components/Blog";
+import Profile from "./components/Profile";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
 import React from "react";
@@ -32,6 +33,7 @@ function App() {
         <Route path="/signup" element={<SignUp />} />
         <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/blog" element={<Blog />} />
+        <Route path="/profile" element={<Profile />} />
       </Routes>
     </BrowserRouter>
   );
