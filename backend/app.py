@@ -151,7 +151,24 @@ with app.app_context():
     db.create_all()
     print("Database initialized successfully!")
 
-CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174"])
+# CORS configuration - allow production and development origins
+ALLOWED_ORIGINS = [
+    "http://localhost:5173", 
+    "http://localhost:5174", 
+    "http://localhost:3000", 
+    "http://127.0.0.1:5173", 
+    "http://127.0.0.1:5174"
+]
+
+# Add production frontend URL from environment variable
+FRONTEND_URL = os.getenv("FRONTEND_URL")
+if FRONTEND_URL:
+    ALLOWED_ORIGINS.append(FRONTEND_URL)
+    # Also add without trailing slash and with https
+    if not FRONTEND_URL.startswith("https://"):
+        ALLOWED_ORIGINS.append(FRONTEND_URL.replace("http://", "https://"))
+
+CORS(app, supports_credentials=True, origins=ALLOWED_ORIGINS, supports_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 
 # Configure OpenRouter
 client = OpenAI(

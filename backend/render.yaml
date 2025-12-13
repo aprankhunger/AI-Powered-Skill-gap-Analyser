@@ -1,0 +1,5 @@
+# Build command
+build:
+  pip install -r requirements.txt
+
+# Start command will be: gunicorn app:app
