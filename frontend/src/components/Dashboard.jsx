@@ -1,6 +1,5 @@
 import React from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import SkillRadar from "./SkillRadar";
 
 function Dashboard() {
   const location = useLocation();

@@ -16,7 +16,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
-CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173"])
+CORS(app, supports_credentials=True, origins=["http://localhost:5173", "http://localhost:5174", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:5174"])
 
 load_dotenv()
 
@@ -314,7 +314,8 @@ def extract_skills_from_text(text):
 # ============ DATA STRUCTURING ============
 def structure_resume_data(file):
     """Structure resume data from PDF"""
-    raw_text = extract_text_from_pdf(file)
+    raw_result = extract_text_from_pdf(file)
+    raw_text = raw_result["text"]  # Extract the text string from the result dict
     
     email = extract_email(raw_text)
     phone = extract_phone(raw_text)
@@ -660,6 +661,9 @@ def analyze_resume():
         })
     
     except Exception as e:
+        import traceback
+        print(f"Error analyzing resume: {str(e)}")
+        print(traceback.format_exc())
         return jsonify({
             "error": "Failed to analyze resume",
             "details": str(e)
@@ -667,4 +671,4 @@ def analyze_resume():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=True)
