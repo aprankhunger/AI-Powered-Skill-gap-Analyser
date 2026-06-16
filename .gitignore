@@ -16,6 +16,7 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Build output
 dist/
@@ -29,17 +30,30 @@ frontend/.env.local
 
 # Backend
 backend/venv/
-backend/__pycache__/
-backend/*.pyc
 backend/.env
 backend/instance/
 backend/*.db
 backend/uploads/
 
+# Python (recursive)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-.env
-__pycache__/
-*.pyc
+# Gemini / AI tooling
+.gemini/
